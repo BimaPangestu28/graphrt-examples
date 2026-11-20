@@ -50,7 +50,7 @@ class ServeClient {
     required Uri serveUrl,
     required String workflowName,
     required this._accessTokenProvider,
-    http.Client? httpClient,
+    http.Client Function()? createHttpClient,
     RetryPolicy? retryPolicy,
     DelayFunction? delay,
     this.connectTimeout = const Duration(seconds: 15),
@@ -58,13 +58,14 @@ class ServeClient {
   }) : _runsUrl = serveUrl.resolve(
          'v1/workflows/${Uri.encodeComponent(workflowName)}/runs',
        ),
-       _httpClient = httpClient ?? http.Client(),
+       _createHttpClient = createHttpClient ?? http.Client.new,
        _retryPolicy = retryPolicy ?? RetryPolicy(),
        _delay = delay ?? Future<void>.delayed;
 
   final Uri _runsUrl;
   final AccessTokenProvider _accessTokenProvider;
-  final http.Client _httpClient;
+  final http.Client Function() _createHttpClient;
+  late http.Client _httpClient = _createHttpClient();
   final RetryPolicy _retryPolicy;
   final DelayFunction _delay;
 
@@ -96,10 +97,15 @@ class ServeClient {
           return;
         }
         failure = await _toHttpFailure(response);
+        // serve answers 401/429/413 before reading the body and may then
+        // close that keep-alive connection; reusing it fails with "Broken
+        // pipe", so the next attempt starts from a fresh connection pool.
+        _discardConnections();
       } on RunInterruptedException {
         rethrow;
       } on Exception catch (error) {
         failure = NetworkFailure(error);
+        _discardConnections();
       }
       final decision = _retryPolicy.decide(
         failure,
@@ -116,6 +122,13 @@ class ServeClient {
           attempt++;
       }
     }
+  }
+
+  /// Closes the current pool (open streams still finish) and starts a new one.
+  void _discardConnections() {
+    final previousClient = _httpClient;
+    _httpClient = _createHttpClient();
+    if (!identical(previousClient, _httpClient)) previousClient.close();
   }
 
   Future<http.StreamedResponse> _send(List<int> body, String accessToken) {

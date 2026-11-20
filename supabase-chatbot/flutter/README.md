@@ -38,6 +38,10 @@ The backend (workflow, migration, serve flags) lives in the graphrt repo at
     stays on screen, marked "Connection lost", with a **Retry** button.
     A started run is never re-sent automatically, since it may already have
     called tools.
+  - After any error response the next attempt uses a fresh connection pool:
+    serve rejects 401/429 before reading the body and may close that
+    keep-alive connection, which would otherwise fail the retry with
+    "Broken pipe".
   - 400 / 413 / 415 and `run_failed` (for example `invalid_input`) are shown
     as errors and not retried. Messages are capped at 4000 characters and the
     body at 60 KiB (oldest history dropped first) before sending.
@@ -121,6 +125,8 @@ lib/
   src/chat/chat_controller.dart   chat state (ChangeNotifier)
   src/ui/                         login and chat screens
 test/                             unit tests (no network)
+test/e2e/                         end-to-end tests against graphrt serve
+tool/e2e/                         e2e runner + fault-injecting proxy
 ```
 
 ## Tests
@@ -135,6 +141,28 @@ boundaries, CR/LF variants, split UTF-8), the retry policy, the serve client
 against a scripted fake server (401 → refresh → retry, 429 `Retry-After`,
 backoff, plain-text 413, mid-stream drops) and the chat controller (partial
 text kept, retry, history saved and sent).
+
+### End-to-end against a real `graphrt serve`
+
+`tool/e2e/run_against_serve.sh` starts `graphrt serve` with the
+supabase-chatbot workflow exactly as the backend smoke test does
+(`--verify-jwt`, `--user-rate-limit 3`, Supabase plugin in `user_rpc` mode,
+mock OpenAI and Supabase upstreams, so no keys or project are needed) plus
+`tool/e2e/fault_proxy.py`, which cuts or stalls streams, then runs
+`test/e2e/serve_e2e_test.dart`:
+
+```sh
+tool/e2e/run_against_serve.sh <graphrt binary> <graphrt checkout> <graphrt-plugins>/supabase
+# +6: All tests passed!
+```
+
+It checks: token-by-token streaming with the tool indicator; an expired token
+answered 401, refreshed and retried once; a token refused twice → "sign in
+again"; 429 with serve's `Retry-After` honored; a stream cut mid-answer keeps
+the partial text and **Retry** completes and saves it; a silent stream hits
+the idle timeout. Needs Python 3, Node.js >= 20 and a graphrt build with the
+`jwt` feature. Without the `E2E_*` variables (plain `flutter test`) these
+tests are skipped.
 
 ## API reference (serve contract)
 

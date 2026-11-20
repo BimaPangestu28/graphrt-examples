@@ -71,7 +71,7 @@ void main() {
     serveUrl: Uri.parse('http://serve.test/base/'),
     workflowName: 'agent',
     accessTokenProvider: tokens.call,
-    httpClient: serve.client,
+    createHttpClient: () => serve.client,
     retryPolicy: RetryPolicy(random: _FixedRandom()),
     delay: (duration) async => sleeps.add(duration),
   );
@@ -147,6 +147,29 @@ void main() {
     );
     expect(serve.requests, hasLength(2));
   });
+
+  test(
+    'a retry after an error response uses a fresh connection pool',
+    () async {
+      final serve = ScriptedServe([
+        () => jsonError(401, 'expired'),
+        () => sse(okStream),
+      ]);
+      var createdClients = 0;
+      final client = ServeClient(
+        serveUrl: Uri.parse('http://serve.test/'),
+        workflowName: 'agent',
+        accessTokenProvider: tokens.call,
+        createHttpClient: () {
+          createdClients++;
+          return serve.client;
+        },
+        delay: (duration) async => sleeps.add(duration),
+      );
+      await client.streamRun(request).toList();
+      expect(createdClients, 2);
+    },
+  );
 
   test('rate limited: waits Retry-After, then succeeds', () async {
     final serve = ScriptedServe([
