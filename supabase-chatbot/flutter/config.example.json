@@ -1,0 +1,6 @@
+{
+  "SUPABASE_URL": "https://YOUR-PROJECT.supabase.co",
+  "SUPABASE_ANON_KEY": "sb_publishable_xxx",
+  "SERVE_URL": "http://10.0.2.2:8080",
+  "WORKFLOW_NAME": "agent"
+}
