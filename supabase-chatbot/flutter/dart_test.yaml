@@ -1,0 +1,3 @@
+tags:
+  # Needs a running graphrt serve: tool/e2e/run_against_serve.sh
+  e2e: {}
